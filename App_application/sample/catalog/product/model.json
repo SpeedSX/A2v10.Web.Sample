@@ -5,6 +5,7 @@
 	"actions": {
 		"index": {
 			"index": true,
+			"template": "index.template",
 			"view": "index.view"
 		}
 	},
@@ -16,6 +17,18 @@
 		"browse": {
 			"index": true,
 			"view": "browse.dialog"
+		},
+		"import": {
+			"model": "",
+			"template": "import.template",
+			"view": "import.dialog"
+		}
+	},
+	"files": {
+		"import": {
+			"type": "parse",
+			"parse": "xlsx",
+			"model": "Product.Import"
 		}
 	}
 }

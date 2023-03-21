@@ -1,6 +1,6 @@
 ﻿/*
 version: 10.0.0021
-generated: 06.07.2021 10:38:05
+generated: 18.02.2023 08:07:33
 */
 
 set nocount on;
@@ -108,9 +108,18 @@ create table a2v10sample.Products
 	Memo nvarchar(255) null,
 	Picture bigint null
 		constraint FK_Products_Picture_Images foreign key references a2v10sample.Images(Id),
-	DateCreated datetime not null constraint DF_Products_DateCreated default(getdate())
+	DateCreated datetime not null constraint DF_Products_DateCreated default(getdate()),
+	ExternalCode nvarchar(255)
 );
 end
+go
+------------------------------------------------
+if not exists(select * from INFORMATION_SCHEMA.COLUMNS where TABLE_SCHEMA=N'a2v10sample' and TABLE_NAME=N'Products' and COLUMN_NAME=N'ExternalCode')
+	alter table a2v10sample.Products add ExternalCode nvarchar(255) null
+go
+------------------------------------------------
+if not exists (select * from sys.indexes where object_id = object_id(N'a2v10sample.Products') and name = N'IX_Products_ExternalCode')
+	create index IX_Products_ExternalCode on a2v10sample.Products ([ExternalCode]) include (Id);
 go
 ------------------------------------------------
 if not exists(select * from INFORMATION_SCHEMA.SEQUENCES where SEQUENCE_SCHEMA=N'a2v10sample' and SEQUENCE_NAME=N'SQ_Documents')
@@ -929,6 +938,60 @@ go
 
 
 
+drop procedure if exists a2v10sample.[Product.Import.Update];
+go
+drop type if exists a2v10sample.[Product.Import.TableType]
+go
+------------------------------------------------
+create type a2v10sample.[Product.Import.TableType] as table
+(
+	RowNumber int,
+	[Код] nvarchar(255),
+	[Наименование] nvarchar(255),
+	[Артикул] nvarchar(255),
+	[Штрих-код] nvarchar(255),
+	[Примечание] nvarchar(255)
+);
+go
+------------------------------------------------
+create or alter procedure a2v10sample.[Product.Import.Metadata]
+as
+begin
+	set nocount on;
+	set transaction isolation level read uncommitted;
+
+	declare @Rows a2v10sample.[Product.Import.TableType];
+	select [Rows!Rows!Metadata] = null, * from @Rows;
+end
+go
+------------------------------------------------
+create or alter procedure a2v10sample.[Product.Import.Update]
+@UserId bigint,
+@Rows a2v10sample.[Product.Import.TableType] readonly
+as
+begin
+	set nocount on;
+	set transaction isolation level read uncommitted;
+	declare @outtable table([action] nvarchar(10));
+	merge a2v10sample.Products as t
+	using @Rows as s
+	on t.ExternalCode = s.[Код]
+	when matched then update set
+		[Name] = s.[Наименование],
+		[Article] = s.[Артикул],
+		[BarCode] = s.[Штрих-код],
+		[Memo] = s.[Примечание]
+	when not matched by target then insert
+		(ExternalCode, [Name], [Article], [BarCode], [Memo]) values
+		(s.[Код], s.[Наименование], [Артикул], [Штрих-код], [Примечание])
+	output $action into @outtable([action]);
+
+	select [Result!TResult!Object] = null,
+		Inserted = (select count(*) from @outtable where [action] = N'INSERT'),
+		Updated = (select count(*) from @outtable where [action] = N'UPDATE');
+end
+go
+
 ------------------------------------------------
 create or alter procedure a2v10sample.[Document.Index]
 @UserId bigint,
@@ -943,7 +1006,7 @@ begin
 
 	select [!TAgent!Map] = null, [Id!!Id] = a.Id, [Name], a.Memo, a.Phone, a.EMail
 	from a2v10sample.Agents a inner join a2v10sample.Documents d on d.Agent = a.Id
-	where d.Id in (select Agent from a2v10sample.Documents);
+	where a.Id in (select Agent from a2v10sample.Documents);
 
 end
 go
@@ -998,7 +1061,7 @@ create or alter procedure a2v10sample.[Document.Update]
 as
 begin
 	set nocount on;
-	set transaction isolation level serializable;
+	set transaction isolation level read committed;
 	set xact_abort on;
 
 	declare @RetId bigint;
@@ -1021,7 +1084,6 @@ begin
 		$action op,
 		inserted.Id id
 	into @output(op, id);
-	select top(1) @RetId = id from @output;
 
 	select top(1) @RetId = id from @output;
 
@@ -1041,7 +1103,7 @@ begin
 		values (@RetId, RowNumber, Qty, Price, [Sum], Product, Memo)
 	when not matched by source and target.Document = @RetId then delete;
 
-	execute a2v10sample.[Document.Load] @UserId, @RetId;
+	exec a2v10sample.[Document.Load] @UserId, @RetId;
 end
 go
 ------------------------------------------------
@@ -1052,6 +1114,8 @@ create or alter procedure a2v10sample.[Document.Delete]
 as
 begin
 	set nocount on;
+	set transaction isolation level read committed;
+
 	begin tran
 	delete from a2v10sample.DocDetails where Document = @Id;
 	delete from a2v10sample.Documents where Id=@Id;

@@ -4,7 +4,7 @@
   font-family: 'A2v10';
   font-display: fallback;
   src: url('/css/fonts/A2v10.eot');
-  src: url('/css/fonts/A2v10.eot?#iefix') format('eot'), url('/css/fonts/A2v10.woff?v=7712') format('woff'), url('/css/fonts/A2v10.ttf?v=7674') format('truetype'), url('/css/fonts/A2v10.svg#A2v10') format('svg');
+  src: url('/css/fonts/A2v10.eot?#iefix') format('eot'), url('/css/fonts/A2v10.woff?v=7895') format('woff'), url('/css/fonts/A2v10.ttf?v=7895') format('truetype'), url('/css/fonts/A2v10.svg#A2v10') format('svg');
   font-weight: normal;
   font-style: normal;
 }
@@ -90,6 +90,15 @@
 .ico-circle-small:before {
   content: "\ea0c";
 }
+.ico-barcode:before {
+  content: "\ea0d";
+}
+.ico-qrcode:before {
+  content: "\ea0e";
+}
+.ico-factory:before {
+  content: "\ea0f";
+}
 .ico-ban-red:before {
   content: "\ea0a";
   color: #a94442;
@@ -152,6 +161,21 @@
 .ico-call:before {
   content: "\ea19";
 }
+.ico-flame:before {
+  content: "\ea1a";
+}
+.ico-truck:before {
+  content: "\ea1b";
+}
+.ico-cart:before {
+  content: "\ea1c";
+}
+.ico-shopping:before {
+  content: "\ea1d";
+}
+.ico-energy:before {
+  content: "\ea1e";
+}
 .ico-camera:before {
   content: "\e9a1";
 }
@@ -178,6 +202,12 @@
 }
 .ico-chart-stacked-line:before {
   content: "\e929";
+}
+.ico-mode-light:before {
+  content: "\e975";
+}
+.ico-mode-dark:before {
+  content: "\e976";
 }
 .ico-check:before {
   content: "\e978";
@@ -311,6 +341,9 @@
 .ico-devices:before {
   content: "\e958";
 }
+.ico-ellipsis-bottom:before {
+  content: "\e9b3";
+}
 .ico-ellipsis:before {
   content: "\e9b4";
 }
@@ -369,6 +402,9 @@
 .ico-file-error:before {
   content: "\e9de";
 }
+.ico-file-download-pdf:before {
+  content: "\e9df";
+}
 .ico-file-preview:before {
   content: "\e9e3";
 }
@@ -384,6 +420,9 @@
 }
 .ico-folder-outline:before {
   content: "\e95a";
+}
+.ico-folders-outline:before {
+  content: "\e959";
 }
 .ico-folder-query:before {
   content: "\ea24";
@@ -449,6 +488,9 @@
 }
 .ico-history:before {
   content: "\e9ff";
+}
+.ico-upgrade:before {
+  content: "\ea01";
 }
 .ico-reload:before,
 .ico-refresh:before {
@@ -639,6 +681,9 @@
 }
 .ico-user-image:before {
   content: "\e9a0";
+}
+.ico-user-role:before {
+  content: "\e9a6";
 }
 .ico-eye:before {
   content: "\e99e";
@@ -1152,6 +1197,12 @@ hr {
 .tag-label.lightgray {
   background-color: #ccc;
 }
+.tag-label.olive {
+  background-color: #b5cc18;
+}
+.tag-label.teal {
+  background-color: #00b5ad;
+}
 .tag-label.hidden {
   display: none;
 }
@@ -1311,7 +1362,7 @@ kbd {
 }
 .menu-container {
   width: 72%;
-  padding: 0.35rem;
+  padding: 0.7rem / 2;
   background-color: #9ab3e0;
   color: white;
   position: fixed;
@@ -1817,7 +1868,9 @@ table.data-grid > tbody > tr.bold > td {
 .modal-footer .btn {
   min-width: 6rem;
 }
-.modal-footer .btn + .btn {
+.modal-footer .btn + .btn,
+.modal-footer .btn + .dropdown,
+.modal-footer .dropdown + .btn {
   margin-left: 0.75rem;
 }
 .modal-footer .btn-help {
@@ -2241,7 +2294,7 @@ table.data-grid > tbody > tr.bold > td {
 .control-group.disabled .input-group {
   background-color: #fafafa;
 }
-.control-group.disabled a {
+.control-group.disabled a:not(.rendershow) {
   pointer-events: none;
   opacity: 0.5;
 }
@@ -2703,7 +2756,7 @@ label.checkbox.small span:after {
   align-self: flex-start;
 }
 .chat-item {
-  padding: 0.25rem;
+  padding: 0.5rem / 2;
   display: block;
   text-align: left;
 }
@@ -3705,7 +3758,7 @@ iframe.eusign-iframe {
 }
 .card.compact .card-header,
 .card.compact .card-footer {
-  padding: 0 0.35rem;
+  padding: 0 0.7rem / 2;
   font-size: 13px;
   line-height: 2rem;
 }
@@ -4041,6 +4094,15 @@ td.vert > .vcell {
   background-color: transparent;
   left: -200mm;
   top: -200mm;
+}
+.of-visible {
+  overflow: visible !important;
+}
+.of-hidden {
+  overflow: hidden !important;
+}
+.of-auto {
+  overflow: auto !important;
 }
 .popover-wrapper {
   position: relative;
@@ -4841,7 +4903,7 @@ td.vert > .vcell {
 }
 .debug-panel {
   position: absolute;
-  top: 3rem;
+  top: 0;
   bottom: 2rem;
   right: 0;
   z-index: 110;

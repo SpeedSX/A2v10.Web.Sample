@@ -1,12 +1,12 @@
 ﻿/*
 ------------------------------------------------
-Copyright © 2008-2021 Alex Kukhtin
+Copyright © 2008-2022 Alex Kukhtin
 
-Last updated : 04 jul 2021
-module version : 7765
+Last updated : 01 dec 2022
+module version : 7910
 */
 ------------------------------------------------
-exec a2sys.SetVersion N'std:security', 7765;
+exec a2sys.SetVersion N'std:security', 7910;
 go
 ------------------------------------------------
 if not exists(select * from INFORMATION_SCHEMA.SCHEMATA where SCHEMA_NAME=N'a2security')
@@ -175,6 +175,7 @@ begin
 		[Guid] uniqueidentifier null,
 		Referral bigint null,
 		Segment nvarchar(32) null,
+		SetPassword bit null,
 		Company bigint null,
 			-- constraint FK_Users_Company_Companies foreign key references a2security.Companies(Id)
 		DateCreated datetime null
@@ -188,6 +189,10 @@ begin
 	alter table a2security.Users add SecurityStamp2 nvarchar(max) null;
 	alter table a2security.Users add PasswordHash2 nvarchar(max) null;
 end
+go
+------------------------------------------------
+if not exists(select * from INFORMATION_SCHEMA.COLUMNS where TABLE_SCHEMA=N'a2security' and TABLE_NAME=N'Users' and COLUMN_NAME=N'SetPassword')
+	alter table a2security.Users add SetPassword bit;
 go
 ------------------------------------------------
 if not exists(select * from INFORMATION_SCHEMA.COLUMNS where TABLE_SCHEMA=N'a2security' and TABLE_NAME=N'Users' and COLUMN_NAME=N'DateCreated')
@@ -590,7 +595,7 @@ as
 		PhoneNumberConfirmed, RegisterHost, ChangePasswordEnabled, TariffPlan, Segment,
 		IsAdmin = cast(case when ug.GroupId = 77 /*predefined: admins*/ then 1 else 0 end as bit),
 		IsTenantAdmin = cast(case when exists(select * from a2security.Tenants where [Admin] = u.Id) then 1 else 0 end as bit),
-		SecurityStamp2, PasswordHash2, Company
+		SecurityStamp2, PasswordHash2, Company, SetPassword
 	from a2security.Users u
 		left join a2security.UserGroups ug on u.Id = ug.UserId and ug.GroupId=77 /*predefined: admins*/
 	where Void=0 and Id <> 0 and ApiUser = 0;
@@ -653,6 +658,8 @@ create procedure a2security.FindUserById
 as
 begin
 	set nocount on;
+	set transaction isolation level read uncommitted;
+
 	select * from a2security.ViewUsers where Id=@Id;
 end
 go
@@ -836,7 +843,9 @@ begin
 	set transaction isolation level read committed;
 	set xact_abort on;
 
-	update a2security.ViewUsers set PasswordHash = @PasswordHash, SecurityStamp = @SecurityStamp where Id=@Id;
+	update a2security.ViewUsers set PasswordHash = @PasswordHash, SecurityStamp = @SecurityStamp,
+		SetPassword = null
+	where Id=@Id;
 	exec a2security.[WriteLog] @Id, N'I', 15; /*PasswordUpdated*/
 end
 go
@@ -1050,6 +1059,50 @@ begin
 	declare @msg nvarchar(255);
 	set @msg = N'User: ' + @UserName;
 	exec a2security.[WriteLog] @RetId, N'I', 2, /*UserCreated*/ @msg;
+end
+go
+------------------------------------------------
+if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'CreateUserSimple')
+	drop procedure a2security.CreateUserSimple
+go
+------------------------------------------------
+create procedure a2security.CreateUserSimple
+@Tenant int = null,
+@UserName nvarchar(255),
+@Email nvarchar(255) = null,
+@PhoneNumber nvarchar(255) = null,
+@PersonName nvarchar(255) = null,
+@Memo nvarchar(255) = null,
+@Locale nvarchar(255) = null,
+@RetId bigint output
+as
+begin
+	-- from CreateTenantUserHandler only
+	set nocount on;
+	set transaction isolation level read committed;
+	set xact_abort on;
+
+	declare @rtable table(id bigint);
+	declare @userId bigint;
+	declare @segment bigint;
+	select @segment = u.Segment, @Locale=isnull(@Locale, u.Locale) from 
+		a2security.Users u inner join a2security.Tenants  t on t.[Admin] = u.Id
+	where t.Id = @Tenant;
+
+	begin tran;
+	insert into a2security.Users(Tenant, UserName, Email, PersonName, PhoneNumber, Memo, Locale, EmailConfirmed, SecurityStamp, 
+		PasswordHash, Segment)
+	output inserted.Id into @rtable(id)
+	values (@Tenant, @UserName, @Email, @PersonName, @PhoneNumber, @Memo, isnull(@Locale, N''), 1, N'', N'', @segment);
+	select @userId = id from @rtable;
+	insert into a2security.UserGroups(UserId, GroupId) values (@userId, 1 /*all users*/);
+	commit tran;
+
+	declare @msg nvarchar(255);
+	set @msg = N'User: ' + @UserName;
+	exec a2security.[WriteLog] @RetId, N'I', 2, /*UserCreated*/ @msg;
+
+	set @RetId = @userId;
 end
 go
 ------------------------------------------------
@@ -1472,7 +1525,6 @@ begin
 		[Company] bigint not null
 			constraint FK_UserCompanies_Company_Companies foreign key references a2security.Companies(Id),
 		[Enabled] bit,
-		[Current] bit, -- TODO:// remove it
 		constraint PK_UserCompanies primary key clustered ([User], [Company]) with (fillfactor = 70)
 	);
 end
@@ -1481,6 +1533,53 @@ go
 if not exists(select * from INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS where CONSTRAINT_SCHEMA = N'a2security' and CONSTRAINT_NAME = N'FK_Users_Company_Companies')
 	alter table a2security.Users add
 		constraint FK_Users_Company_Companies foreign key (Company) references a2security.Companies(Id);
+go
+------------------------------------------------
+if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'User.Companies.Check')
+	drop procedure a2security.[User.Companies.Check]
+go
+------------------------------------------------
+create procedure a2security.[User.Companies.Check]
+@UserId bigint,
+@Error bit,
+@CompanyId bigint output
+as
+begin
+	set nocount on;
+	set transaction isolation level read committed;
+	set xact_abort on;
+	declare @isadmin bit;
+	declare @id bigint;
+
+	select @id = Id, @isadmin = IsAdmin, @CompanyId = Company from a2security.ViewUsers where Id=@UserId;
+	if @id is null
+	begin
+		raiserror (N'UI:No such user', 16, -1) with nowait;
+		return;
+	end
+	if @isadmin = 1
+	begin
+		if @CompanyId is null or @CompanyId = 0 or not exists(select * from a2security.Companies where Id=@CompanyId)
+		begin
+			select top(1) @CompanyId = Id from a2security.Companies where Id <> 0;
+			update a2security.ViewUsers set Company = @CompanyId where Id = @UserId;
+		end
+	end
+	else
+	begin
+		-- not admin
+		if @CompanyId is null or @CompanyId = 0 or not exists(select * from a2security.UserCompanies where [User] = @UserId and Company = @CompanyId)
+		begin
+			select top(1) @CompanyId = Company from a2security.UserCompanies where Company <> 0 and [Enabled]=1 and [User] = @UserId;
+			update a2security.ViewUsers set Company = @CompanyId where Id = @UserId;
+		end
+	end
+	if @Error = 1 and @CompanyId is null
+	begin
+		raiserror (N'UI:No current company', 16, -1) with nowait;
+		return;
+	end
+end
 go
 ------------------------------------------------
 if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'User.Companies')
@@ -1499,19 +1598,6 @@ begin
 	declare @company bigint;
 
 	select @isadmin = IsAdmin, @company = Company from a2security.ViewUsers where Id=@UserId;
-	if @company is null
-	begin
-		if @isadmin = 1
-			select top(1) @company = Id from a2security.Companies where Id <> 0;
-		else
-			select top(1) @company = Company from a2security.UserCompanies where Company <> 0 and [Enabled]=1;
-		update a2security.ViewUsers set Company = @company where Id = @UserId;
-	end
-	else if not exists(select 1 from a2security.UserCompanies where [User]=@UserId and Company=@company and [Enabled] = 1)
-	begin
-		update a2security.ViewUsers set Company = (select top(1) Company from a2security.UserCompanies where [User]=@UserId and [Enabled] = 1)
-		where Id = @UserId;
-	end
 
 	-- all companies for the current user
 	select [Companies!TCompany!Array] = null, 
@@ -1665,6 +1751,81 @@ begin
 	commit tran;
 end
 go
+-- .JWT SUPPORT
+------------------------------------------------
+if not exists(select * from INFORMATION_SCHEMA.TABLES where TABLE_SCHEMA=N'a2security' and TABLE_NAME=N'RefreshTokens')
+	create table a2security.RefreshTokens
+	(
+		UserId bigint not null
+			constraint FK_RefreshTokens_UserId_Users foreign key references a2security.Users(Id),
+		[Provider] nvarchar(64) not null,
+		[Token] nvarchar(255) not null,
+		Expires datetime not null,
+		constraint PK_RefreshTokens primary key (UserId, [Provider], Token) with (fillfactor = 70)
+	)
+go
+------------------------------------------------
+if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'AddToken')
+	drop procedure a2security.[AddToken]
+go
+------------------------------------------------
+create procedure a2security.[AddToken]
+@UserId bigint,
+@Provider nvarchar(64),
+@Token nvarchar(255),
+@Expires datetime,
+@Remove nvarchar(255) = null
+as
+begin
+	set nocount on;
+	set transaction isolation level read committed;
+	set xact_abort on;
+	begin tran;
+	insert into a2security.RefreshTokens(UserId, [Provider], Token, Expires)
+		values (@UserId, @Provider, @Token, @Expires);
+	if @Remove is not null
+		delete from a2security.RefreshTokens 
+		where UserId=@UserId and [Provider] = @Provider and Token = @Remove;
+	commit tran;
+end
+go
+------------------------------------------------
+if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'GetToken')
+	drop procedure a2security.[GetToken]
+go
+------------------------------------------------
+create procedure a2security.[GetToken]
+@UserId bigint,
+@Provider nvarchar(64),
+@Token nvarchar(255)
+as
+begin
+	set nocount on;
+	set transaction isolation level read committed;
+
+	select [Token], UserId, Expires from a2security.RefreshTokens
+	where UserId=@UserId and [Provider] = @Provider and Token = @Token;
+end
+go
+------------------------------------------------
+if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'RemoveToken')
+	drop procedure a2security.[RemoveToken]
+go
+------------------------------------------------
+create procedure a2security.[RemoveToken]
+@UserId bigint,
+@Provider nvarchar(64),
+@Token nvarchar(255)
+as
+begin
+	set nocount on;
+	set transaction isolation level read committed;
+	set xact_abort on;
+
+	delete from a2security.RefreshTokens 
+	where UserId=@UserId and [Provider] = @Provider and Token = @Token;
+end
+go
 -- .NET CORE SUPPORT
 ------------------------------------------------
 if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'User.SetPasswordHash')
@@ -1699,6 +1860,23 @@ begin
 	set xact_abort on;
 
 	update a2security.ViewUsers set SecurityStamp2 = @SecurityStamp where Id=@UserId;
+end
+go
+------------------------------------------------
+if exists (select * from INFORMATION_SCHEMA.ROUTINES where ROUTINE_SCHEMA=N'a2security' and ROUTINE_NAME=N'User.SetPhoneNumberConfirmed')
+	drop procedure a2security.[User.SetPhoneNumberConfirmed]
+go
+------------------------------------------------
+create procedure a2security.[User.SetPhoneNumberConfirmed]
+@UserId bigint,
+@Confirmed bit
+as
+begin
+	set nocount on;
+	set transaction isolation level read committed;
+	set xact_abort on;
+
+	update a2security.ViewUsers set PhoneNumberConfirmed = @Confirmed where Id=@UserId;
 end
 go
 ------------------------------------------------
